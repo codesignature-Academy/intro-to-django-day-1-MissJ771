@@ -1,0 +1,90 @@
+name: GitHub Classroom Workflow
+
+'on':
+  - push
+  - workflow_dispatch
+  - repository_dispatch
+
+permissions:
+  checks: write
+  actions: read
+  contents: read
+
+jobs:
+  run-autograding-tests:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-classroom[bot]'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 'manage.py exists'
+        id: manage-py-exists
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: 'manage.py exists'
+          command: 'find . -maxdepth 3 -iname "manage.py" | grep -q .'
+          timeout: 2
+          max-score: 5
+
+      - name: 'Project passes Django check'
+        id: django-check
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: 'Project passes Django check'
+          setup-command: 'python3 -m pip install --quiet django'
+          command: |-
+            MANAGE=$(find . -maxdepth 3 -iname "manage.py" | head -n1)
+            cd "$(dirname "$MANAGE")"
+            python3 manage.py check
+          timeout: 3
+          max-score: 15
+
+      - name: 'Dev server boots'
+        id: server-boots
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: 'Dev server boots'
+          setup-command: 'python3 -m pip install --quiet django'
+          command: |-
+            MANAGE=$(find . -maxdepth 3 -iname "manage.py" | head -n1)
+            cd "$(dirname "$MANAGE")"
+            timeout 6 python3 manage.py runserver --noreload 0.0.0.0:8000 &
+            sleep 3
+            curl -sf http://localhost:8000/ -o /dev/null
+          timeout: 3
+          max-score: 10
+
+      - name: 'No virtual environment committed'
+        id: no-venv-committed
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: 'No virtual environment committed'
+          command: '! find . -maxdepth 4 -iname "pyvenv.cfg" | grep -q .'
+          timeout: 2
+          max-score: 5
+
+      - name: 'gitignore excludes env or db files'
+        id: gitignore-ok
+        uses: classroom-resources/autograding-command-grader@v1
+        with:
+          test-name: 'gitignore excludes env or db files'
+          command: 'test -f .gitignore && grep -qiE "venv|env/" .gitignore && grep -q "db.sqlite3" .gitignore'
+          timeout: 2
+          max-score: 5
+
+      - name: Autograding Reporter
+        uses: classroom-resources/autograding-grading-reporter@v1
+        env:
+          MANAGE-PY-EXISTS_RESULTS: "${{steps.manage-py-exists.outputs.result}}"
+          DJANGO-CHECK_RESULTS: "${{steps.django-check.outputs.result}}"
+          SERVER-BOOTS_RESULTS: "${{steps.server-boots.outputs.result}}"
+          NO-VENV-COMMITTED_RESULTS: "${{steps.no-venv-committed.outputs.result}}"
+          GITIGNORE-OK_RESULTS: "${{steps.gitignore-ok.outputs.result}}"
+        with:
+          runners: manage-py-exists,django-check,server-boots,no-venv-committed,gitignore-ok
